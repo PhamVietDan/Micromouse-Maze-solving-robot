@@ -1,0 +1,134 @@
+graph TB
+    Start([Khởi động hệ thống])
+    Start --> Init[Khởi tạo:<br/>- Motor, IR, Encoder<br/>- Bluetooth<br/>- Tường biên mê cung<br/>- Vị trí 0,0 hướng Bắc]
+    
+    Init --> MainLoop{Vòng lặp chính<br/>solver}
+    
+    MainLoop --> CheckDest[Kiểm tra đích]
+    
+    CheckDest --> AtGoal{Đã đến<br/>vùng Goal?<br/>7,7-8,8}
+    
+    AtGoal -->|Có| SwitchTarget[target = 0<br/>Chuyển sang chế độ<br/>quay về Start]
+    AtGoal -->|Không| CheckStart
+    
+    SwitchTarget --> CheckStart{target = 0?<br/>Đang về Start?}
+    
+    CheckStart -->|Có, đã về 0,0| Stop([DỪNG HẲN])
+    CheckStart -->|Chưa| UpdateWalls
+    
+    CheckDest -->|target = 1| UpdateWalls[Cập nhật tường]
+    
+    UpdateWalls --> ReadIR[Đọc 4 cảm biến IR:<br/>SL, SR, FL, FR]
+    
+    ReadIR --> DetectWalls{Phát hiện tường?<br/>threshold = 22}
+    
+    DetectWalls --> MarkWalls[Đánh dấu tường vào<br/>verticalWalls và<br/>horizontalWalls<br/>theo hướng hiện tại]
+    
+    MarkWalls --> Floodfill[FLOODFILL ALGORITHM]
+    
+    Floodfill --> ResetFlood[Reset toàn bộ<br/>floodArray = -1]
+    
+    ResetFlood --> InitQueue[Tạo Queue<br/>Đặt đích = 0]
+    
+    InitQueue --> GoalOrStart{target = 1?}
+    
+    GoalOrStart -->|Đi đến Goal| SetGoal[Đặt vùng 7,7-8,8<br/>= 0 vào queue]
+    GoalOrStart -->|Về Start| SetStart[Đặt ô 0,0<br/>= 0 vào queue]
+    
+    SetGoal --> BFS
+    SetStart --> BFS[BFS - Duyệt queue]
+    
+    BFS --> QueueEmpty{Queue<br/>rỗng?}
+    
+    QueueEmpty -->|Không| PopQueue[Lấy ô hiện tại<br/>từ queue]
+    
+    PopQueue --> Check4Dir[Kiểm tra 4 hướng:<br/>North, West, South, East]
+    
+    Check4Dir --> ValidNeighbor{Ô kế có hợp lệ?<br/>- Trong biên<br/>- Không có tường<br/>- Chưa set hoặc<br/>giá trị lớn hơn}
+    
+    ValidNeighbor -->|Có| CalcScore[Tính score:<br/>value = current + TILE_SCORE<br/>+ TURN_SCORE nếu đổi hướng]
+    
+    CalcScore --> UpdateFlood[Cập nhật floodArray<br/>Thêm vào queue]
+    
+    UpdateFlood --> Check4Dir
+    ValidNeighbor -->|Không| Check4Dir
+    
+    Check4Dir --> BFS
+    
+    QueueEmpty -->|Có| NextAction[Chọn hành động tiếp theo]
+    
+    NextAction --> GetCurrent[Lấy giá trị flood<br/>ô hiện tại]
+    
+    GetCurrent --> Compare4Dir[So sánh 4 hướng<br/>tìm min flood]
+    
+    Compare4Dir --> MinDir{Hướng có<br/>min flood?}
+    
+    MinDir --> SameDir{Cùng hướng<br/>hiện tại?}
+    
+    SameDir -->|Có| MoveForward[DI CHUYỂN TIẾN]
+    
+    MoveForward --> ResetEnc[Reset Encoder = 0]
+    
+    ResetEnc --> PIDLoop{Encoder <<br/>CELL_TICKS?<br/>1900 xung}
+    
+    PIDLoop -->|Có| ReadIRPID[Đọc IR liên tục]
+    
+    ReadIRPID --> WallCase{Trường hợp<br/>tường?}
+    
+    WallCase -->|2 bên có tường| PID2Wall[PID giữa 2 tường:<br/>error = SL - SR<br/>pid = Kp×e + Kd×Δe]
+    
+    WallCase -->|Chỉ tường trái| PIDLeft[PID bám trái:<br/>error = 30 - SL<br/>pid = Kp×e + Kd×Δe]
+    
+    WallCase -->|Chỉ tường phải| PIDRight[PID bám phải:<br/>error = SR - 30<br/>pid = Kp×e + Kd×Δe]
+    
+    WallCase -->|Không tường| Straight[Chạy thẳng<br/>2 motor = PWM_FWD]
+    
+    PID2Wall --> AdjustMotor[Điều chỉnh motor:<br/>Left = speed + pid<br/>Right = speed - pid]
+    PIDLeft --> AdjustMotor
+    PIDRight --> AdjustMotor
+    Straight --> AdjustMotor
+    
+    AdjustMotor --> CheckStuck{Encoder<br/>không đổi<br/>>350ms?}
+    
+    CheckStuck -->|Có - Kẹt| BreakForce[Phanh khẩn cấp<br/>Thoát loop]
+    CheckStuck -->|Không| PIDLoop
+    
+    PIDLoop -->|Không, đủ xung| Brake[Phanh + Dừng motor<br/>Delay 300ms]
+    BreakForce --> Brake
+    
+    Brake --> UpdatePos[Cập nhật vị trí:<br/>x, y theo hướng]
+    
+    UpdatePos --> MainLoop
+    
+    SameDir -->|Không| NeedTurn{Góc quay?}
+    
+    NeedTurn -->|90° trái| TurnLeft[QUAY TRÁI 90°]
+    NeedTurn -->|90° phải| TurnRight[QUAY PHẢI 90°]
+    NeedTurn -->|180°| Turn180[QUAY 180°]
+    
+    TurnLeft --> ResetEncTurn[Reset Encoder]
+    TurnRight --> ResetEncTurn
+    Turn180 --> ResetEncTurn
+    
+    ResetEncTurn --> TurnLoop{Encoder <<br/>TURN_TICKS?}
+    
+    TurnLoop -->|Có| ApplyTurn[Động cơ quay:<br/>Left = -PWM_TURN<br/>Right = +PWM_TURN]
+    
+    ApplyTurn --> TurnLoop
+    
+    TurnLoop -->|Không| BrakeTurn[Phanh + Delay 200ms]
+    
+    BrakeTurn --> UpdateHeading[Cập nhật hướng<br/>currentHeading]
+    
+    UpdateHeading --> MainLoop
+    
+    style Start fill:#90EE90
+    style Stop fill:#FF6B6B
+    style Floodfill fill:#FFD700
+    style MoveForward fill:#87CEEB
+    style TurnLeft fill:#DDA0DD
+    style TurnRight fill:#DDA0DD
+    style Turn180 fill:#DDA0DD
+    style PID2Wall fill:#FFA07A
+    style PIDLeft fill:#FFA07A
+    style PIDRight fill:#FFA07A
